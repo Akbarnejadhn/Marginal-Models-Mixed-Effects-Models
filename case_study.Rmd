@@ -151,3 +151,76 @@ ggplot(data2) +
 # apparently this guy has increasing trend, but not reflected in the estimated parameters (due to model restriction)
 ```
 
+## PD GCase case-study
+
+### Frist question we are trying to answer: Does GCase activity change over time on PD/control?
+
+*In LMM, slopes are individual_level. But here we are looking for groups, for which we are looking for fixed-effects.*
+
+Two general points:
+
+* Spaghetti plot is a good way to visualize longitudinal data (if we care about the trend, i.e. time is a variable of interest).
+
+* In order to decide whether to fit a random intercept model or random intercept and slope model, sometimes we can refer to spaghetti plot. If observations have similar trend, random inercept might work well, if not we might consider random intercept and slope model.
+
+```{r}
+
+# load data
+# manipulate data
+gcase_data = read_csv("GCase.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    visit = as.numeric(as.factor(clinical_event)) -1,  # BL=0, V04=1, V06=2, V08=3 (add -1 because we need it to start from zero so that the intercept is interpretable)
+    mutation = as.numeric(gba_mutation != "N"),        # 1=mutation, 0=no
+  )
+
+# speghetti plot can show us if the study is balanced or un-balanced
+ggplot(gcase_data) + 
+  geom_path(aes(x = visit, y = testvalue, group = patno)) +
+  ggtitle("Longitudinal GCase Activity")
+# we can see that the data is not very irregular
+
+## my code is not working from here, but look at the process and recording for interpretations:
+
+# fit a random intercept model
+# Lmm_21 = lme(testvalue ~ visit+gender+diagnosis+mutation, random = ~1 | patno,  data = gcase_data, method='REML') 
+# summary (lmm_21)
+```
+
+### Second question we are trying to answer: Does the rate of change is different in different groups?
+
+*We need an interactio term between time and PD and see if the interaction term is non-zero*
+
+```{r}
+
+# fit subgroup analysis, separate LMM (random intercept) for PD and control
+# LMM1.PD <- lme (TESTVALUE ~ visit+GENDER+mutation, random = ~1 | PATNO,  data = GCase.data, subset=DIAGNOSIS=="PD", method='REML') 
+# summary (LMM1.PD)# rate of change: 0.24
+# LMM1.Control <- lme (TESTVALUE ~ visit+GENDER+mutation, random = ~1 | PATNO,  data = GCase.data, subset=DIAGNOSIS=="Control", method='REML') 
+# summary (LMM1.Control)# rate of change: 0.13 (not significant)
+# 
+# 
+# # fit one analysis, with interaction
+# LMM2.1 <- lme (TESTVALUE ~ visit+GENDER+DIAGNOSIS+mutation+DIAGNOSIS*visit, random = ~1 | PATNO,  data = GCase.data, method='ML') # do NOT use REML for likelihood ratio
+# LMM2.2 <- lme (TESTVALUE ~ visit+GENDER+DIAGNOSIS+mutation, random = ~1 | PATNO,  data = GCase.data, method='ML')
+# anova(LMM2.2,LMM2.1)  # LRT of interaction (not significant)
+# LMM2<- lme (TESTVALUE ~ visit+GENDER+DIAGNOSIS+mutation+DIAGNOSIS*visit, random = ~1 | PATNO,  data = GCase.data, method='REML') 
+# summary (LMM2) # Wald test of interaction ( not significant)
+# 
+# 
+# # discrepency? Why? 
+# # -- subgroup analysis is different from unified analysis (where effect sizes in other variables are enforced to be the same)
+# # -- (relevant to this case) the time effect for PD group is still significant in the unified model
+# beta_PD=fixed.effects(LMM2)[2]+fixed.effects(LMM2)[6] # beta_visit+beta_visit*diagPD
+# beta_PD_std=sqrt(vcov(LMM2)[2,2]+vcov(LMM2)[6,6]+2*vcov(LMM2)[2,6]) # std(beta_visit+beta_visit*diagPD)
+# 1-pnorm(beta_PD/beta_PD_std) # approx wald p-value
+
+
+
+# RESULTS:
+# insignificant rate of change for controls (0.13 and pvalue of 0.19)
+# insignificant difference rate of change in PD vs control (0.11 and p-val of 0.336)
+# but significant rate of change in PD (from LMM1.PD model) (0.24 and p-val of 0.0001) We could obtain it from 0.13 + 0.11
+
+```
+

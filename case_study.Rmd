@@ -1,0 +1,39 @@
+---
+title: "Linear Mixed-Effects Models"
+author: "Hana Akbarnejad"
+date: "5/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(nlme)
+library(ggplot2)
+library(readr)
+```
+
+## Turb Case-study
+
+### Frist question we are trying to answer: Comparing pre and post intervention scores
+
+* response: physician score
+
+* prediction: checklist intervention (pre-intervention:0, post-intervention:1)
+
+* grouping variable: physician
+
+```{r}
+turbt_data = read_csv("TURBT.csv")
+```
+
+
+### Second question we are trying to answer: Investigate the trend of post-intervention scores
+
+Focusing on the post-intervention subset of data
+
+* response: physician score
+
+* prediction: time
+
+* grouping variable: physician

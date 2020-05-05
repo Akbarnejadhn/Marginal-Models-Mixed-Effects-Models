@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(nlme)
 library(ggplot2)
 library(readr)
+library(tidyverse)
 ```
 
 ## Turb Case-study
@@ -24,9 +25,51 @@ library(readr)
 * grouping variable: physician
 
 ```{r}
-turbt_data = read_csv("TURBT.csv")
+turbt_data = read_csv("TURBT.csv") %>% 
+  janitor::clean_names()
+
+# manipulating data (Gen's way)
+start='12/1/2017'
+days = as.Date(as.character(turbt_data$date_of_procedure), format="%m/%d/%Y")-
+  as.Date(as.character(start), format="%m/%d/%Y")
+days = as.numeric(days) # days since the intervention
+doc=as.character(turbt_data$performing_provider)
+unique(doc) # 18 physicians
+score=turbt_data$count_of_elements
+after=as.numeric(days>0)
 ```
 
+```{r}
+
+# boxplot to get a rough picture of the effect of intervention
+boxplot(score~after)
+
+# first, fit GLS with compound symmetry covariance
+# form = ~ 1|doc means is only depends on the doctor:
+# doctors are indep of each other
+# observations for each doctor are orrelated
+gls_compsym = nlme::gls(score~after, correlation=corCompSymm(form = ~ 1|doc),  method="REML")
+
+summary(gls_compsym)
+# Rho: 0.1456703 correlation of coomp symmetry approach
+# beta: 0.285822 is parameter of interest (how the score changes after vs before intervention): The average increase in score after intervention is 0.286 across all measurments of all doctors. However, the p-valus is 0.1842 > 0.05 which is not significant.
+# second correlation is from Fisher Information Inverse (-0.446)
+
+#equivalently, can fit a LMM:
+# random = ~1 | doc shows that the model is random intercept model, which is equivalent to GLS with compound symmetry covariance
+lmm_1 = lme (score ~ after, random = ~1 | doc, method='REML')
+
+summary (lmm_1)
+# we cab see that the :fixed effects" part ois exatcly the same
+# This  model doesn't give us Rho. instead it gives the StdDev's: 0.7293101 is sigma_b and 1.766198 is sigma
+# important point: from correlation in mixed-effect model (sigma and sigma_b), we can re-sonstruct correlation in marginal model (Rho):
+# (sigma_b)^2/{(sigma_b)^2 + (sigma)^2}
+
+# observing foxed-effects and random-effects:
+fixed.effects(lmm_1)
+random.effects(lmm_1) # tells ud b_i for each doctor. can see which doctors have higher and lower than average scores
+
+```
 
 ### Second question we are trying to answer: Investigate the trend of post-intervention scores
 
@@ -37,3 +80,74 @@ Focusing on the post-intervention subset of data
 * prediction: time
 
 * grouping variable: physician
+
+*Because we are interested in time, compound su=ymmetry covariance might not be a good choice here*
+
+```{r}
+
+data1=data.frame(days,score,doc)
+data2=subset(data1,days>0)
+
+# speghetti plot can show us if the study is balanced or un-balanced
+ggplot(data2) + 
+  geom_path(aes(x = days, y = score, group = doc)) +
+  ggtitle("Score change after intervention")
+# shows a highly unbalanced study
+
+# fit LMM with random intercept
+lmm_2 = lme(score ~ days,random = ~ 1 | doc,  data = data2)
+summary(lmm_2)
+# sigma-b: 0.8588977
+# sigma: 1.70249
+# beta:-0.006002 after intervention, the average score across all measurements of all physicians, has decreased by 0.006, and the effect is significant (pvalue 0.0095 < 0.05)
+
+# fit LMM with random intercept and slope
+lmm_3 = lme(score ~ days, random = ~ 1+ days | doc, data = data2)
+summary (lmm_3) 
+#This gives ud the lower triangle of covariance matrix (g-matrix):
+#stDev of random intercept: 1.197925173 
+#stDev of random slope: 0.006506309
+#correlation between these two: -0.645
+#stDev of residuals:1.644204525 (indep pf others, so no correlation)
+
+# This model doesn't give us the fisher information inverse, so we need to derive it ourself
+vcov(lmm_3)
+# gives us var-covar matrix of coefficient estimates:
+#var intercept (var(beta_0\hat)): 0.1941588683      >>> could get this from Std.Error in fixed-effects: (0.4406346)^2
+#var slope(days) (var(beta_1\hat)): 8.462273e-06    >>> could get this from Std.Error in fixed-effects: (0.0029090)^2
+#covar of slope-intercept:   -0.0009823516          >>> could get this from  Correlation of days in fixed-effects: -0.766
+
+# uses BLUP to predict b_0i's and b_1i's (random effects: random intercepts and random slopes):
+random.effects(lmm_3) 
+#The output gives us the deviation of each individual's intercept and slope from the global average intercept and slope that we had obtained in the fixed-effects part
+
+# Caution: goodness of fit check is also important to know which model is the best, but not covered here
+```
+
+```{r}
+# answering some questions about the models we have fitted:
+
+# who has overall better performance? 
+# need to focus on intercept
+subj1=rownames(random.effects(lmm_3))[which.max(random.effects(lmm_3)[,1])]
+ggplot(data2) + 
+  geom_path(aes(x = days, y = score, group = doc)) +
+  geom_line(data=data2[data2$doc==subj1,],aes(x=days, y=score,color=subj1))+
+  ggtitle("Score change after intervention")
+
+# who improve over time
+# i.e. those with positive trend (considering both slope and intercept)
+subj2=rownames(random.effects(lmm_3))[fixed.effects(lmm_3)[2]+random.effects(lmm_3)[,2]>0]
+ggplot(data2) + 
+  geom_path(aes(x = days, y = score, group = doc)) +
+  geom_line(data=data2[data2$doc==subj2,],aes(x=days, y=score,color=subj2))+
+  ggtitle("Score change after intervention")
+
+# some outlying curves are not well represented in this example:
+ggplot(data2) + 
+  geom_path(aes(x = days, y = score, group = doc)) +
+  geom_line(data=data2[data2$doc=='John Naitoh MD',],aes(x=days, y=score,color="John Naitoh MD"))+
+  ggtitle("Score change after intervention")
+# apparently this guy has increasing trend, but not reflected in the estimated parameters (due to model restriction)
+```
+
